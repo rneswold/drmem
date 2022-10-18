@@ -2,7 +2,7 @@
 
 _A small, capable control system for the hobbyist_
 
-[![Rust](https://github.com/DrMem-Control-System/drmem/actions/workflows/rust.yml/badge.svg)](https://github.com/DrMem-Control-System/drmem/actions/workflows/rust.yml)
+[![CI](https://github.com/DrMem-Control-System/drmem/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/DrMem-Control-System/drmem/actions/workflows/ci.yml)
 
 ---
 
