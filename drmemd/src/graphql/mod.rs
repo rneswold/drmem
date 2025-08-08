@@ -1,17 +1,16 @@
 use chrono::prelude::*;
 use drmem_api::{client, device, driver, Error};
 use futures::Future;
-use juniper::{
-    executor::FieldError, graphql_object, graphql_subscription, graphql_value,
-    FieldResult, GraphQLInputObject, GraphQLObject, RootNode, Value,
-};
-use juniper_graphql_ws::ConnectionConfig;
-use juniper_warp::subscriptions::serve_graphql_ws;
 use libmdns::Responder;
 use std::{pin::Pin, result, sync::Arc, time::Duration};
+use async_graphql::*;
+use async_graphql_axum::{
+    GraphQLRequest, GraphQLResponse, GraphQLSubscription,
+};
+use axum::{
+    extract::State, http::header::{HeaderMap, AUTHORIZATION}, response::Html, routing::get, Router };
 use tracing::{error, info, info_span};
 use tracing_futures::Instrument;
-use warp::{http::StatusCode, reject, reply, Filter, Rejection, Reply};
 
 pub mod config;
 
@@ -24,8 +23,6 @@ impl reject::Reject for NoAuthorization {}
 
 #[derive(Clone)]
 struct ConfigDb(crate::driver::DriverDb, client::RequestChan);
-
-impl juniper::Context for ConfigDb {}
 
 // `DriverInfo` is an object that can be returned by a GraphQL
 // query. It contains information related to drivers that are

@@ -121,27 +121,21 @@ optional = true
 # This section defines the optional dependencies for the 'graphql'
 # feature.
 
-[dependencies.juniper]
-version = "0.16"
+[dependencies.async-graphql]
+version = "7"
 default-features = false
-features = ["chrono"]
+features = ["chrono", "tokio"]
 optional = true
 
-[dependencies.juniper_warp]
+[dependencies.async-graphql-axum]
+version = "7"
+default-features = false
+optional = true
+
+[dependencies.axum]
 version = "0.8"
 default-features = false
-features = ["subscriptions"]
-optional = true
-
-[dependencies.juniper_graphql_ws]
-version = "0.4"
-default-features = false
-optional = true
-
-[dependencies.warp]
-version = "0.3"
-default-features = false
-features = ["tls", "compression-gzip"]
+features = ["ws"]
 optional = true
 
 [dependencies.libmdns]
@@ -152,6 +146,7 @@ optional = true
 [dependencies.rustls-pki-types]
 version = "1.11"
 default-features = false
+features = ["alloc"]
 optional = true
 
 [dependencies.ring]
@@ -177,10 +172,10 @@ redis-backend = ["dep:redis", "graphql"]
 # Client APIs
 
 no-client = []
-graphql = ["dep:warp", "dep:juniper", "dep:juniper_graphql_ws",
-           "dep:juniper_warp", "dep:libmdns", "dep:rustls-pki-types",
-           "dep:ring", "dep:rustls-pemfile"]
-graphiql = ["graphql"]
+graphql = ["dep:async-graphql", "dep:async-graphql-axum", "dep:axum",
+           "dep:libmdns", "dep:rustls-pki-types", "dep:ring",
+           "dep:rustls-pemfile"]
+graphiql = ["graphql", "async-graphql?/graphiql"]
 
 # Drivers
 
