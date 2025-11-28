@@ -2,7 +2,7 @@
 name = "drmem-api"
 version = "0.6.0"
 authors = ["Rich Neswold <rich.neswold@gmail.com>"]
-edition = "2021"
+edition = "2024"
 description = "Traits and types used internally by the DrMem control system"
 homepage = "https://github.com/DrMemCS/drmem"
 repository = "https://github.com/DrMemCS/drmem"
