@@ -2,7 +2,7 @@
 name = "drmem-drv-tplink"
 version = "0.6.0"
 authors = ["Rich Neswold <rich.neswold@gmail.com>"]
-edition = "2021"
+edition = "2024"
 homepage = "https://github.com/DrMemCS/drmem"
 description = "DrMem driver for TP-Link devices"
 repository = "https://github.com/DrMemCS/drmem"
