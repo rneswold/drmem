@@ -1294,7 +1294,7 @@ pub fn server<R: Reporter + Clone>(
 
             let service = resp.register(
                 "_drmem._tcp".into(),
-                cfg.name.clone(),
+                &cfg.name,
                 cfg.addr.port(),
                 &payload.iter().map(String::as_str).collect::<Vec<&str>>(),
             );

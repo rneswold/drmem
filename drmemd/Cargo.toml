@@ -144,7 +144,7 @@ features = ["tls", "compression-gzip"]
 optional = true
 
 [dependencies.libmdns]
-version = "0.9"
+version = "0.10"
 default-features = false
 optional = true
 
