@@ -159,7 +159,7 @@ default-features = false
 optional = true
 
 [dependencies.rustls-pemfile]
-version = "1"
+version = "2"
 default-features = false
 optional = true
 
