@@ -22,11 +22,11 @@ chrono.default-features = false
 
 toml.workspace = true
 toml.default-features = false
-toml.features = ["parse"]
+toml.features = ["serde"]
 
 tokio.workspace = true
 tokio.default-features = false
-tokio.features = ["time", "macros"]
+tokio.features = ["macros"]
 
 tokio-stream.workspace = true
 tokio-stream.default-features = false
@@ -36,14 +36,16 @@ tracing.default-features = false
 
 serde.workspace = true
 serde.default-features = false
-serde.features = ["derive"]
 
 palette.workspace = true
 palette.default-features = false
-palette.features = ["libm"]
 
 [dev-dependencies]
 tokio.workspace = true
-tokio.features = ["rt"]
+tokio.default-features = false
+
+toml.workspace = true
+toml.default-features = false
+toml.features = ["parse"]
 
 noop-waker = "0.1"

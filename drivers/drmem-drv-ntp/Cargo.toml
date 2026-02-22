@@ -16,14 +16,12 @@ doctest = false
 [dependencies]
 serde.workspace = true
 serde.default-features = false
-serde.features = ["derive"]
 
 toml.workspace = true
 toml.default-features = false
 
 tokio.workspace = true
 tokio.default-features = false
-tokio.features = ["net", "time", "macros"]
 
 tracing.workspace = true
 tracing.default-features = false

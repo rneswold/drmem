@@ -6,7 +6,10 @@ edition = "2024"
 [dependencies]
 serde.workspace = true
 serde.default-features = false
-serde.features = ["derive"]
+serde.features = ["derive", "rc"]
+
+toml.workspace = true
+toml.default-features = false
 
 palette.workspace = true
 
@@ -14,14 +17,16 @@ tokio.workspace = true
 tokio.default-features = false
 
 tracing.workspace = true
+tracing.default-features = false
+tracing.features = ["attributes"]
 
 reqwest.workspace = true
 reqwest.default-features = false
-reqwest.features = ["http2", "stream", "rustls-no-provider", "json"]
+reqwest.features = ["stream", "json", "rustls"]
 
 rustls.version = "0.23"
 rustls.default-features = false
-rustls.features = ["std", "ring"]
+rustls.features = ["ring"]
 
 futures.workspace = true
 
@@ -29,6 +34,5 @@ futures-util = "0.3"
 
 serde_json.workspace = true
 serde_json.default-features = false
-serde_json.features = ["std"]
 
 drmem-api = { path = "../../drmem-api", version = "0.7" }
