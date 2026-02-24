@@ -22,6 +22,7 @@ futures.default-features = false
 
 tokio.workspace = true
 tokio.default-features = false
+tokio.features = ["io-util", "net"]
 
 tracing.workspace = true
 tracing.default-features = false
@@ -34,6 +35,7 @@ serde.default-features = false
 
 serde_json.workspace = true
 serde_json.default-features = false
+serde_json.features = ["std"]
 
 drmem-api = { path = "../../drmem-api", version = "0.7" }
 

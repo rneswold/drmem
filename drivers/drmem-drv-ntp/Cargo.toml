@@ -22,11 +22,14 @@ toml.default-features = false
 
 tokio.workspace = true
 tokio.default-features = false
+tokio.features = ["net", "time"]
 
 tracing.workspace = true
 tracing.default-features = false
 
-tracing-subscriber.workspace = true
-tracing-subscriber.default-features = false
-
 drmem-api = { path = "../../drmem-api", version = "0.7" }
+
+[dev-dependencies]
+toml.workspace = true
+toml.default-features = false
+toml.features = ["parse"]

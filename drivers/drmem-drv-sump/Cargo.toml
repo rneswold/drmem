@@ -25,11 +25,9 @@ toml.default-features = false
 
 tokio.workspace = true
 tokio.default-features = false
+tokio.features = ["io-util", "net"]
 
 tracing.workspace = true
 tracing.default-features = false
-
-tracing-subscriber.workspace = true
-tracing-subscriber.default-features = false
 
 drmem-api = { path = "../../drmem-api", version = "0.7" }
