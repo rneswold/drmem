@@ -19,11 +19,10 @@
 use crate::{
     device::Path,
     driver::{
-        OverridableDevice, ReadOnlyDevice, Registrator, Reporter, RequestChan,
-        Result,
+        OverridableDevice, OverrideConfig, ReadOnlyDevice, Registrator,
+        Reporter, RequestChan, Result,
     },
 };
-use tokio::time::Duration;
 
 /// Defines the common API used by Dimmers.
 pub struct ColorBulb<R: Reporter> {
@@ -37,7 +36,7 @@ pub struct ColorBulb<R: Reporter> {
 }
 
 impl<R: Reporter> Registrator<R> for ColorBulb<R> {
-    type Config = Option<Duration>;
+    type Config = OverrideConfig;
 
     async fn register_devices(
         drc: &mut RequestChan<R>,
@@ -54,7 +53,8 @@ impl<R: Reporter> Registrator<R> for ColorBulb<R> {
                     "brightness",
                     subpath,
                     Some("%"),
-                    *cfg,
+                    cfg.override_duration,
+                    cfg.envelope,
                     max_history,
                 )
                 .await?,
@@ -63,7 +63,8 @@ impl<R: Reporter> Registrator<R> for ColorBulb<R> {
                     "color",
                     subpath,
                     None,
-                    *cfg,
+                    cfg.override_duration,
+                    cfg.envelope,
                     max_history,
                 )
                 .await?,

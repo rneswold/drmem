@@ -2,7 +2,7 @@ use super::{config, driver::device_traits};
 use drmem_api::{
     Result,
     device::Path,
-    driver::{Registrator, Reporter, ResettableState, classes},
+    driver::{OverrideConfig, Registrator, Reporter, ResettableState, classes},
 };
 use std::{collections::HashMap, sync::Arc};
 use tokio::time::Duration;
@@ -21,7 +21,10 @@ impl<R: Reporter> Set<R> {
         cfg: &config::DeviceConfig,
         max_history: Option<usize>,
     ) -> Result<(Arc<str>, DeviceWrapper<R>)> {
-        let tmo = cfg.override_timeout.map(|v| Duration::from_secs(v));
+        let override_cfg = OverrideConfig {
+            override_duration: cfg.override_timeout.map(Duration::from_secs),
+            envelope: Some(Duration::from_secs(30)),
+        };
 
         Ok((
             cfg.id.clone(),
@@ -31,7 +34,7 @@ impl<R: Reporter> Set<R> {
                         inner: classes::Switch::register_devices(
                             drc,
                             Some(cfg.subpath.as_ref()),
-                            &tmo,
+                            &override_cfg,
                             max_history,
                         )
                         .await?,
@@ -42,7 +45,7 @@ impl<R: Reporter> Set<R> {
                         inner: classes::Dimmer::register_devices(
                             drc,
                             Some(cfg.subpath.as_ref()),
-                            &tmo,
+                            &override_cfg,
                             max_history,
                         )
                         .await?,
@@ -53,7 +56,7 @@ impl<R: Reporter> Set<R> {
                         classes::ColorBulb::register_devices(
                             drc,
                             Some(cfg.subpath.as_ref()),
-                            &tmo,
+                            &override_cfg,
                             max_history,
                         )
                         .await?,
@@ -65,7 +68,7 @@ impl<R: Reporter> Set<R> {
                         classes::ColorBulb::register_devices(
                             drc,
                             Some(cfg.subpath.as_ref()),
-                            &tmo,
+                            &override_cfg,
                             max_history,
                         )
                         .await?,

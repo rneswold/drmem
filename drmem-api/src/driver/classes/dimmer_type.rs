@@ -19,11 +19,11 @@
 use crate::{
     device::Path,
     driver::{
-        overridable_device::OverridableDevice, ro_device::ReadOnlyDevice,
+        overridable_device::{OverridableDevice, OverrideConfig},
+        ro_device::ReadOnlyDevice,
         Registrator, Reporter, RequestChan, Result,
     },
 };
-use tokio::time::Duration;
 
 pub struct DimmerProperty {
     pub brightness: Option<f64>,
@@ -76,7 +76,7 @@ impl<R: Reporter> Dimmer<R> {
 }
 
 impl<R: Reporter> Registrator<R> for Dimmer<R> {
-    type Config = Option<Duration>;
+    type Config = OverrideConfig;
 
     async fn register_devices(
         drc: &mut RequestChan<R>,
@@ -93,7 +93,8 @@ impl<R: Reporter> Registrator<R> for Dimmer<R> {
                     "brightness",
                     subpath,
                     Some("%"),
-                    *cfg,
+                    cfg.override_duration,
+                    cfg.envelope,
                     max_history,
                 )
                 .await?,
@@ -102,7 +103,8 @@ impl<R: Reporter> Registrator<R> for Dimmer<R> {
                     "indicator",
                     subpath,
                     None,
-                    *cfg,
+                    cfg.override_duration,
+                    cfg.envelope,
                     max_history,
                 )
                 .await?,

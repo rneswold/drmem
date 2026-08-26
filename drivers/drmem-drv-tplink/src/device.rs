@@ -1,6 +1,9 @@
 use drmem_api::{
     device::Path,
-    driver::{classes, Registrator, Reporter, RequestChan, ResettableState},
+    driver::{
+        classes, OverrideConfig, Registrator, Reporter, RequestChan,
+        ResettableState,
+    },
     Result,
 };
 use tokio::time::Duration;
@@ -43,14 +46,20 @@ impl<R: Reporter> Registrator<R> for Set<R> {
         cfg: &Self::Config,
         max_history: Option<usize>,
     ) -> Result<Self> {
+        let override_cfg = OverrideConfig {
+            override_duration: cfg
+                .override_timeout
+                .map(|v| Duration::from_secs(60 * v)),
+            envelope: Some(Duration::from_secs(5)),
+        };
+
         match cfg.r#type {
             config::DevCfgType::Switch | config::DevCfgType::Outlet => {
                 Ok(Set::Switch(
                     classes::Switch::register_devices(
                         drc,
                         subpath,
-                        &cfg.override_timeout
-                            .map(|v| Duration::from_secs(60 * v)),
+                        &override_cfg,
                         max_history,
                     )
                     .await?,
@@ -60,7 +69,7 @@ impl<R: Reporter> Registrator<R> for Set<R> {
                 classes::Dimmer::register_devices(
                     drc,
                     subpath,
-                    &cfg.override_timeout.map(|v| Duration::from_secs(60 * v)),
+                    &override_cfg,
                     max_history,
                 )
                 .await?,
