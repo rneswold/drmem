@@ -9,15 +9,10 @@ pub trait HueDevice<R: Reporter> {
     fn resource_type(&self) -> &'static str;
 
     /// Wait for the next setting change and return a command if one is ready
-    fn next_setting(
-        &mut self,
-    ) -> impl std::future::Future<Output = Option<payload::LightCommand>> + Send;
+    async fn next_setting(&mut self) -> Option<payload::LightCommand>;
 
     /// Apply an update from the bridge to the device
-    fn apply_update(
-        &mut self,
-        update: &payload::ResourceData,
-    ) -> impl std::future::Future<Output = ()> + Send;
+    async fn apply_update(&mut self, update: &payload::ResourceData) -> ();
 
     /// Reset the device state (called when driver restarts)
     fn reset(&mut self);
