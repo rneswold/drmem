@@ -41,15 +41,15 @@ impl<R: Reporter> Set<R> {
                     ))
                 }
                 config::DevCfgType::Dimmer | config::DevCfgType::Bulb => {
-                    DeviceWrapper::Dimmer(device_traits::DimmerDevice {
-                        inner: classes::Dimmer::register_devices(
+                    DeviceWrapper::Dimmer(
+                        device_traits::DimmerDevice::register_devices(
                             drc,
                             Some(cfg.subpath.as_ref()),
                             &override_cfg,
                             max_history,
                         )
                         .await?,
-                    })
+                    )
                 }
                 config::DevCfgType::ColorBulb => DeviceWrapper::ColorBulb(
                     device_traits::ColorBulbDevice::new(

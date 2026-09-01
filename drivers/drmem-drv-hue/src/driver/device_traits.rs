@@ -1,6 +1,13 @@
 /// Trait-based device handling for Hue devices
 use super::{constants, payload};
-use drmem_api::driver::{Reporter, ResettableState, classes};
+use drmem_api::{
+    Result,
+    device::Path,
+    driver::{
+        OverrideConfig, Registrator, Reporter, RequestChan, ResettableState,
+        classes,
+    },
+};
 use tracing::debug;
 
 /// Common interface for all Hue device types
@@ -47,13 +54,36 @@ impl<R: Reporter> HueDevice<R> for SwitchDevice<R> {
     }
 
     fn reset(&mut self) {
-        self.0.reset_state();
+        self.0.reset_state()
     }
 }
 
 /// Wrapper for Dimmer/Bulb devices
 pub struct DimmerDevice<R: Reporter> {
-    pub inner: classes::Dimmer<R>,
+    pub dimmer: classes::Dimmer<R>,
+}
+
+impl<R: Reporter> ResettableState for DimmerDevice<R> {}
+
+impl<R: Reporter> Registrator<R> for DimmerDevice<R> {
+    type Config = OverrideConfig;
+
+    async fn register_devices(
+        drc: &mut RequestChan<R>,
+        subpath: Option<&Path>,
+        cfg: &Self::Config,
+        max_history: Option<usize>,
+    ) -> Result<Self> {
+        Ok(DimmerDevice {
+            dimmer: classes::Dimmer::register_devices(
+                drc,
+                subpath,
+                cfg,
+                max_history,
+            )
+            .await?,
+        })
+    }
 }
 
 impl<R: Reporter> HueDevice<R> for DimmerDevice<R> {
@@ -62,74 +92,48 @@ impl<R: Reporter> HueDevice<R> for DimmerDevice<R> {
     }
 
     async fn next_setting(&mut self) -> Option<payload::LightCommand> {
-        loop {
-            tokio::select! {
-                // Check brightness device
-                opt_txn = self.inner.brightness.next_setting() => {
-                    if let Some((val, reply)) = opt_txn {
-                        let val = val.clamp(0.0, 100.0).round();
-
-                        debug!("dimmer brightness setting ready: {}", val);
-
-                        if let Some(r) = reply {
-                            r.ok(val);
-                        }
-
-                        let cmd = if val == 0.0 {
-                            payload::LightCommand {
-                                on: Some(payload::On { on: false }),
-                                dimming: None,
-                                color: None,
-                            }
-                        } else {
-                            payload::LightCommand {
-                                on: Some(payload::On { on: true }),
-                                dimming: Some(payload::Dimming {
-                                    brightness: val as f32,
-                                }),
-                                color: None,
-                            }
-                        };
-                        return Some(cmd);
-                    }
+        if let Some(brightness) = self.dimmer.next_setting().await {
+            let cmd = if brightness.brightness == 0.0 {
+                payload::LightCommand {
+                    on: Some(payload::On { on: false }),
+                    dimming: None,
+                    color: None,
                 }
-
-                // Check indicator device (drain but don't send command)
-                opt_txn = self.inner.indicator.next_setting() => {
-                    if let Some((val, Some(r))) = opt_txn {
-                        r.ok(val);
-                    }
+            } else {
+                payload::LightCommand {
+                    on: Some(payload::On { on: true }),
+                    dimming: Some(payload::Dimming {
+                        brightness: brightness.brightness as f32,
+                    }),
+                    color: None,
                 }
-            }
+            };
+            Some(cmd)
+        } else {
+            Some(payload::LightCommand {
+                on: None,
+                dimming: None,
+                color: None,
+            })
         }
     }
 
     async fn apply_update(&mut self, update: &payload::ResourceData) {
-        if let Some(on) = &update.on {
-            if !on.on {
-                debug!("dimmer: reporting brightness update: 0");
-                self.inner.brightness.report_update(0.0).await;
-            } else if let Some(dim) = &update.dimming {
-                let brightness = (dim.brightness as f64).round();
+        let brightness = match (&update.on, &update.dimming) {
+            (Some(payload::On { on: false }), _) => 0.0,
+            (Some(payload::On { on: true }), None) => 100.0,
+            (_, Some(dim)) => (dim.brightness as f64).round(),
+            (None, None) => return,
+        };
 
-                debug!("dimmer: reporting brightness update: {}", brightness);
-                self.inner.brightness.report_update(brightness).await;
-            } else {
-                // Use 100% if brightness is missing when device is on
-                debug!("dimmer: reporting brightness update: 100 (default)");
-                self.inner.brightness.report_update(100.0).await;
-            }
-        } else if let Some(dim) = &update.dimming {
-            let brightness = (dim.brightness as f64).round();
-
-            debug!("dimmer: reporting brightness update: {}", brightness);
-            self.inner.brightness.report_update(brightness).await;
-        }
+        debug!("dimmer: brightness update: {}", brightness);
+        self.dimmer
+            .report_update(classes::DimmerProperty { brightness })
+            .await;
     }
 
     fn reset(&mut self) {
-        self.inner.brightness.reset_state();
-        self.inner.indicator.reset_state();
+        self.dimmer.reset_state();
     }
 }
 

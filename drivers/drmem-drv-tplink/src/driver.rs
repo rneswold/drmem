@@ -441,19 +441,20 @@ impl Instance {
             self.reported_error = Some(value);
             match dev {
                 device::Set::Switch(sw) => sw.report_error(value).await,
-                device::Set::Dimmer(classes::Dimmer { error, .. }) => {
-                    error.report_update(value).await
-                }
+                device::Set::Dimmer(device::DimmerWithIndicator {
+                    dimmer,
+                    ..
+                }) => dimmer.report_error(value).await,
             }
         }
     }
 
     async fn pause_as_dimmer<R: Reporter>(
         &mut self,
-        dev: &mut classes::Dimmer<R>,
+        dev: &mut device::DimmerWithIndicator<R>,
     ) {
-        let classes::Dimmer {
-            brightness: ref mut d_b,
+        let device::DimmerWithIndicator {
+            dimmer: ref mut d_d,
             indicator: ref mut d_i,
             ..
         } = dev;
@@ -467,11 +468,7 @@ impl Instance {
                 _ = &mut timeout => {
                     break;
                 }
-                Some((v, reply)) = d_b.next_setting() => {
-                    if let Some(reply) = reply {
-                        reply.ok(v);
-                    }
-                }
+                Some(_) = d_d.next_setting() => {}
                 Some((v, reply)) = d_i.next_setting() => {
                     if let Some(reply) = reply {
                         reply.ok(v);
@@ -528,10 +525,10 @@ impl Instance {
     async fn manage_connect_as_dimmer<R: Reporter>(
         &mut self,
         task: JoinHandle<Result<TcpStream>>,
-        dev: &mut classes::Dimmer<R>,
+        dev: &mut device::DimmerWithIndicator<R>,
     ) -> Result<TcpStream> {
-        let classes::Dimmer {
-            brightness: ref mut d_b,
+        let device::DimmerWithIndicator {
+            dimmer: ref mut d_d,
             indicator: ref mut d_i,
             ..
         } = dev;
@@ -552,11 +549,7 @@ impl Instance {
                         }
                     }
                 }
-                Some((v, reply)) = d_b.next_setting() => {
-                    if let Some(reply) = reply {
-                        reply.ok(v);
-                    }
-                }
+                Some(_) = d_d.next_setting() => {}
                 Some((v, reply)) = d_i.next_setting() => {
                     if let Some(reply) = reply {
                         reply.ok(v);
@@ -615,17 +608,9 @@ impl Instance {
     async fn manage_dimmer<R: Reporter>(
         &mut self,
         s: &mut TcpStream,
-        dev: &mut classes::Dimmer<R>,
+        dev: &mut device::DimmerWithIndicator<R>,
     ) -> bool {
-        // Get mutable references to the setting channels.
-
-        let classes::Dimmer {
-            brightness: ref mut d_b,
-            indicator: ref mut d_i,
-            ..
-        } = dev;
-
-        // Now wait for one of three events to occur.
+        // Now wait for one of two events to occur.
 
         #[rustfmt::skip]
         tokio::select! {
@@ -645,11 +630,11 @@ impl Instance {
                 match self.info_rpc(s).await {
                     Ok(info) => {
                         if let Some(indicator) = info.indicator {
-                            d_i.report_update(indicator).await
+                            dev.indicator.report_update(indicator).await
                         }
 
                         if let Some(brightness) = info.brightness {
-                            d_b.report_update(brightness).await
+                            dev.dimmer.report_update(classes::DimmerProperty{brightness}).await
                         }
                     }
                     Err(e) => {
@@ -659,24 +644,22 @@ impl Instance {
                 }
             }
 
-	    // Handle settings to the brightness device.
-
-            Some((v, reply)) = d_b.next_setting() => {
-                if let Err(e) = self.handle_brightness_setting(s, v, reply).await {
-                    error!("couldn't set brightness -- {e}");
-		    return false
-		};
-                self.poll_timeout = Duration::from_secs(0);
-            }
-
-	    // Handle settings to the LED indicator device.
-
-            Some((v, reply)) = d_i.next_setting() => {
-		debug!("led setting -> {}", &v);
-                if let Err(e) = self.handle_led_setting(s, v, reply).await {
-                    error!("couldn't set indicator -- {e}");
-		    return false
-		}
+            Some(setting) = dev.next_setting() => {
+                match setting {
+                    device::Setting::Dimmer(prop) => {
+                        if let Err(e) = self.handle_brightness_setting(s, prop.brightness, None).await {
+                            error!("couldn't set brightness -- {e}");
+                            return false
+                        }
+                    }
+                    device::Setting::Indicator(v) => {
+                        debug!("led setting -> {}", &v);
+                        if let Err(e) = self.handle_led_setting(s, v, None).await {
+                            error!("couldn't set indicator -- {e}");
+                            return false
+                        }
+                    }
+                }
                 self.poll_timeout = Duration::from_secs(0);
             }
         }
