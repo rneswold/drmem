@@ -25,8 +25,7 @@ impl<R: Reporter> ResettableState for Set<R> {
     fn reset_state(&mut self) {
         match self {
             Set::Switch(dev) => {
-                dev.state.reset_state();
-                dev.indicator.reset_state();
+                dev.reset_state();
             }
             Set::Dimmer(dev) => {
                 dev.brightness.reset_state();

@@ -26,50 +26,36 @@ use crate::{
 };
 
 pub struct SwitchProperty {
-    pub state: Option<bool>,
-    pub indicator: Option<bool>,
+    pub state: bool,
 }
 
 /// Defines the common API used by Switches.
 pub struct Switch<R: Reporter> {
     /// This device returns `true` when the driver has a problem
     /// communicating with the hardware.
-    pub error: ReadOnlyDevice<bool, R>,
+    error: ReadOnlyDevice<bool, R>,
     /// Indicates the state of the switch. Writing `true` or `false`
     /// turns the switch on and off, respectively.
-    pub state: OverridableDevice<bool, R>,
-    /// A product might include an indicator. If the hardware does,
-    /// this device can turn it on and off.
-    pub indicator: OverridableDevice<bool, R>,
+    state: OverridableDevice<bool, R>,
 }
 
 impl<R: Reporter> Switch<R> {
     // Reports any new properties specified in the `prop` parameter.
     pub async fn report_update(&mut self, prop: SwitchProperty) {
-        if let Some(v) = prop.state {
-            self.state.report_update(v).await
-        }
-
-        if let Some(v) = prop.indicator {
-            self.indicator.report_update(v).await
-        }
+        self.state.report_update(prop.state).await
     }
 
-    pub async fn next_setting(&mut self) -> SwitchProperty {
-        tokio::select! {
-            Some((value, resp)) = self.state.next_setting() => {
-                if let Some(resp) = resp {
-                    resp.ok(value);
-                }
-                SwitchProperty { state: Some(value), indicator: None }
-            }
-            Some((value, resp)) = self.indicator.next_setting() => {
-                if let Some(resp) = resp {
-                    resp.ok(value);
-                }
-                SwitchProperty { state: None, indicator: Some(value) }
-            }
+    pub async fn report_error(&mut self, error: bool) {
+        self.error.report_update(error).await
+    }
+
+    pub async fn next_setting(&mut self) -> Option<SwitchProperty> {
+        let (value, resp) = self.state.next_setting().await?;
+
+        if let Some(resp) = resp {
+            resp.ok(value);
         }
+        Some(SwitchProperty { state: value })
     }
 }
 
@@ -89,16 +75,6 @@ impl<R: Reporter> Registrator<R> for Switch<R> {
             state: drc
                 .add_overridable_device(
                     "state",
-                    subpath,
-                    None,
-                    cfg.override_duration,
-                    cfg.envelope,
-                    max_history,
-                )
-                .await?,
-            indicator: drc
-                .add_overridable_device(
-                    "indicator",
                     subpath,
                     None,
                     cfg.override_duration,

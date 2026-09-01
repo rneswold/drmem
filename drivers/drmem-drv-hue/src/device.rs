@@ -30,15 +30,15 @@ impl<R: Reporter> Set<R> {
             cfg.id.clone(),
             match cfg.r#type {
                 config::DevCfgType::Switch => {
-                    DeviceWrapper::Switch(device_traits::SwitchDevice {
-                        inner: classes::Switch::register_devices(
+                    DeviceWrapper::Switch(device_traits::SwitchDevice(
+                        classes::Switch::register_devices(
                             drc,
                             Some(cfg.subpath.as_ref()),
                             &override_cfg,
                             max_history,
                         )
                         .await?,
-                    })
+                    ))
                 }
                 config::DevCfgType::Dimmer | config::DevCfgType::Bulb => {
                     DeviceWrapper::Dimmer(device_traits::DimmerDevice {

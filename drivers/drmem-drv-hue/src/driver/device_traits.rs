@@ -19,9 +19,7 @@ pub trait HueDevice<R: Reporter> {
 }
 
 /// Wrapper for Switch devices
-pub struct SwitchDevice<R: Reporter> {
-    pub inner: classes::Switch<R>,
-}
+pub struct SwitchDevice<R: Reporter>(pub classes::Switch<R>);
 
 impl<R: Reporter> HueDevice<R> for SwitchDevice<R> {
     fn resource_type(&self) -> &'static str {
@@ -29,43 +27,27 @@ impl<R: Reporter> HueDevice<R> for SwitchDevice<R> {
     }
 
     async fn next_setting(&mut self) -> Option<payload::LightCommand> {
-        loop {
-            tokio::select! {
-                // Check state device
-                opt_txn = self.inner.state.next_setting() => {
-                    if let Some((val, reply)) = opt_txn {
-                        debug!("switch state setting ready: {}", val);
-                        if let Some(r) = reply {
-                            r.ok(val);
-                        }
-                        return Some(payload::LightCommand {
-                            on: Some(payload::On { on: val }),
-                            dimming: None,
-                            color: None,
-                        });
-                    }
-                }
-
-                // Check indicator device (drain but don't send command)
-                opt_txn = self.inner.indicator.next_setting() => {
-                    if let Some((val, Some(r))) = opt_txn {
-                        r.ok(val);
-                    }
-                }
+        self.0.next_setting().await.map(|val| {
+            debug!("switch state setting ready: {}", val.state);
+            payload::LightCommand {
+                on: Some(payload::On { on: val.state }),
+                dimming: None,
+                color: None,
             }
-        }
+        })
     }
 
     async fn apply_update(&mut self, update: &payload::ResourceData) {
         if let Some(on) = &update.on {
             debug!("switch: reporting state update: {}", on.on);
-            self.inner.state.report_update(on.on).await;
+            self.0
+                .report_update(classes::SwitchProperty { state: on.on })
+                .await;
         }
     }
 
     fn reset(&mut self) {
-        self.inner.state.reset_state();
-        self.inner.indicator.reset_state();
+        self.0.reset_state();
     }
 }
 

@@ -440,9 +440,7 @@ impl Instance {
         if self.reported_error != Some(value) {
             self.reported_error = Some(value);
             match dev {
-                device::Set::Switch(classes::Switch { error, .. }) => {
-                    error.report_update(value).await
-                }
+                device::Set::Switch(sw) => sw.report_error(value).await,
                 device::Set::Dimmer(classes::Dimmer { error, .. }) => {
                     error.report_update(value).await
                 }
@@ -487,12 +485,6 @@ impl Instance {
         &mut self,
         dev: &mut classes::Switch<R>,
     ) {
-        let classes::Switch {
-            state: ref mut d_r,
-            indicator: ref mut d_i,
-            ..
-        } = dev;
-
         let timeout = time::sleep(Duration::from_secs(60));
         tokio::pin!(timeout);
 
@@ -502,16 +494,7 @@ impl Instance {
                 _ = &mut timeout => {
                     break;
                 }
-                Some((v, reply)) = d_r.next_setting() => {
-                    if let Some(reply) = reply {
-                        reply.ok(v);
-                    }
-                }
-                Some((v, reply)) = d_i.next_setting() => {
-                    if let Some(reply) = reply {
-                        reply.ok(v);
-                    }
-                }
+                Some(_) = dev.next_setting() => {}
             }
         }
     }
@@ -521,12 +504,6 @@ impl Instance {
         task: JoinHandle<Result<TcpStream>>,
         dev: &mut classes::Switch<R>,
     ) -> Result<TcpStream> {
-        let classes::Switch {
-            state: ref mut d_r,
-            indicator: ref mut d_i,
-            ..
-        } = dev;
-
         tokio::pin!(task);
 
         loop {
@@ -543,16 +520,7 @@ impl Instance {
                         }
                     }
                 }
-                Some((v, reply)) = d_r.next_setting() => {
-                    if let Some(reply) = reply {
-                        reply.ok(v);
-                    }
-                }
-                Some((v, reply)) = d_i.next_setting() => {
-                    if let Some(reply) = reply {
-                        reply.ok(v);
-                    }
-                }
+                Some(_) = dev.next_setting() => {}
             }
         }
     }
@@ -603,16 +571,6 @@ impl Instance {
         s: &mut TcpStream,
         dev: &mut classes::Switch<R>,
     ) -> bool {
-        // Get mutable references to the setting channels.
-
-        let classes::Switch {
-            state: ref mut d_r,
-            indicator: ref mut d_i,
-            ..
-        } = dev;
-
-        // Now wait for one of three events to occur.
-
         #[rustfmt::skip]
         tokio::select! {
             // If our poll timeout expires, we need to request the
@@ -630,12 +588,8 @@ impl Instance {
 
                 match self.info_rpc(s).await {
                     Ok(info) => {
-                        if let Some(indicator) = info.indicator {
-                            d_i.report_update(indicator).await
-                        }
-
                         if let Some(relay) = info.relay {
-                            d_r.report_update(relay).await
+                            dev.report_update(classes::SwitchProperty { state: relay }).await
                         }
                     }
                     Err(e) => {
@@ -645,27 +599,13 @@ impl Instance {
                 }
             }
 
-	    // Handle settings to the brightness device.
+            // Handle settings to the state device.
 
-            Some((v, reply)) = d_r.next_setting() => {
-                if let Some(reply) = reply {
-                    reply.ok(v);
-                }
+            Some(classes::SwitchProperty { state: v }) = dev.next_setting() => {
                 if let Err(e) = self.relay_state_rpc(s, v).await {
                     error!("couldn't set relay state -- {e}");
-		    return false
-		};
-                self.poll_timeout = Duration::from_secs(0);
-            }
-
-	    // Handle settings to the LED indicator device.
-
-            Some((v, reply)) = d_i.next_setting() => {
-		debug!("led setting -> {}", &v);
-                if let Err(e) = self.handle_led_setting(s, v, reply).await {
-                    error!("couldn't set indicator -- {e}");
-		    return false
-		}
+                    return false
+                }
                 self.poll_timeout = Duration::from_secs(0);
             }
         }
