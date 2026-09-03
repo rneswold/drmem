@@ -17,7 +17,7 @@
 //! ```
 
 use crate::{
-    device::Path,
+    device::{ColorType, Path},
     driver::{
         OverridableDevice, OverrideConfig, ReadOnlyDevice, Registrator,
         Reporter, RequestChan, Result,
@@ -29,10 +29,9 @@ pub struct ColorBulb<R: Reporter> {
     /// This device returns `true` when the driver has a problem
     /// communicating with the hardware.
     pub error: ReadOnlyDevice<bool, R>,
-    /// Controls the brightness setting of the bulb. Off is 0.0 and
-    /// full-on is 100.0.
-    pub brightness: OverridableDevice<f64, R>,
-    pub color: OverridableDevice<palette::LinSrgba<u8>, R>,
+    /// Controls the color of the bulb. Brightness is conveyed via the
+    /// color's alpha channel: 0 is off and 255 is full brightness.
+    pub color: OverridableDevice<ColorType, R>,
 }
 
 impl<R: Reporter> Registrator<R> for ColorBulb<R> {
@@ -47,16 +46,6 @@ impl<R: Reporter> Registrator<R> for ColorBulb<R> {
         Ok(ColorBulb {
             error: drc
                 .add_ro_device("error", subpath, None, max_history)
-                .await?,
-            brightness: drc
-                .add_overridable_device(
-                    "brightness",
-                    subpath,
-                    Some("%"),
-                    cfg.override_duration,
-                    cfg.envelope,
-                    max_history,
-                )
                 .await?,
             color: drc
                 .add_overridable_device(
@@ -74,7 +63,6 @@ impl<R: Reporter> Registrator<R> for ColorBulb<R> {
 
 impl<R: Reporter> crate::driver::ResettableState for ColorBulb<R> {
     fn reset_state(&mut self) {
-        self.brightness.reset_state();
         self.color.reset_state();
     }
 }
