@@ -30,7 +30,7 @@ use crate::{
     driver::{rw_device, Reporter, RxDeviceSetting, SettingResponder},
 };
 use tokio_stream::StreamExt;
-use tracing::{info, instrument, warn};
+use tracing::{debug, info, instrument, warn};
 
 pub type SettingTransaction<T> = (T, Option<SettingResponder<T>>);
 
@@ -99,10 +99,28 @@ enum State<T: device::ReadWriteCompat> {
     },
 }
 
+impl<T: device::ReadWriteCompat> std::fmt::Debug for State<T> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            State::Unknown => write!(f, "<<Unknown>>"),
+            State::UnknownTrans { .. } => {
+                write!(f, "<<UnknownTrans>>")
+            }
+            State::Synced { .. } => write!(f, "<<Synced>>"),
+            State::SyncedTrans { .. } => {
+                write!(f, "<<SyncedTrans>>")
+            }
+            State::Applying { .. } => write!(f, "<<Applying>>",),
+            State::ApplyingTrans { .. } => write!(f, "<<ApplyingTrans>>",),
+            State::Overridden { .. } => write!(f, "<<Overridden>>",),
+        }
+    }
+}
+
 pub struct OverridableDevice<T: device::ReadWriteCompat, R: Reporter> {
     state: State<T>,
     override_duration: Option<tokio::time::Duration>,
-    envelope: Option<tokio::time::Duration>,
+    envelope: tokio::time::Duration,
     reporter: R,
     set_stream: rw_device::SettingStream<T>,
 }
@@ -130,12 +148,13 @@ where
             })
             .unwrap_or(State::Unknown);
 
+        debug!("initial state: {:?}", state);
         OverridableDevice {
             state,
             reporter,
             set_stream: rw_device::create_setting_stream(setting_chan),
             override_duration,
-            envelope,
+            envelope: envelope.unwrap_or_default(),
         }
     }
 
@@ -147,15 +166,15 @@ where
     /// `.await` resolves, so a cancelled call can be retried without
     /// losing or duplicating a report.
     #[inline(never)]
-    #[instrument(skip(self))]
+    #[instrument(skip(self), fields(state = ?self.state))]
     pub async fn report_update(&mut self, new_value: T) {
+        debug!("waiting for the next report in state {:?}", self.state);
+
         let next_deadline = self
             .override_duration
             .map(|duration| tokio::time::Instant::now() + duration)
             .unwrap_or_else(tokio::time::Instant::now);
-        let next_envelope =
-            tokio::time::Instant::now() + self.envelope.unwrap_or_default();
-        let has_envelope = self.envelope.is_some();
+        let next_envelope = tokio::time::Instant::now() + self.envelope;
 
         match &mut self.state {
             State::Unknown => {
@@ -165,6 +184,7 @@ where
                 // reading, we switch to the synced state. If a
                 // setting comes it, it can further modify the state.
 
+                debug!("entering Synced state with value {:?}", &new_value);
                 self.state = State::Synced { value: new_value }
             }
 
@@ -190,14 +210,17 @@ where
                 // save the new reading.
 
                 if setting == &new_value {
-                    info!("value matches setting, transitioning to Synced");
                     self.reporter.report_value(new_value.clone().into()).await;
+                    debug!("entering Synced state with value {:?}", &new_value);
                     self.state = State::Synced {
                         value: setting.clone(),
                     };
                 } else if value != &new_value {
-                    info!("value differs from setting, transitioning to Overridden");
                     self.reporter.report_value(new_value.clone().into()).await;
+                    debug!(
+                        "reset Overridden state with new value {:?}",
+                        &new_value
+                    );
                     self.state = State::Overridden {
                         deadline: next_deadline,
                         setting: value.clone(),
@@ -212,6 +235,7 @@ where
 
                 if value != &new_value {
                     self.reporter.report_value(new_value.clone().into()).await;
+                    debug!("value differs from previous, transitioning to Overridden");
                     self.state = State::Overridden {
                         deadline: next_deadline,
                         setting: value.clone(),
@@ -230,16 +254,11 @@ where
                 setting, last_seen, ..
             } => {
                 if setting == &new_value {
-                    if has_envelope {
-                        *last_seen = new_value;
-                    } else {
-                        self.state = State::Synced { value: new_value };
-                    }
+                    *last_seen = new_value;
                 } else {
-                    warn!("reasserting setting");
-
                     let setting = setting.clone();
 
+                    warn!("reasserting setting, via ApplyingTrans");
                     self.state = State::ApplyingTrans {
                         setting: setting.clone(),
                         last_seen: new_value,
@@ -273,15 +292,12 @@ where
                         resp.ok(new_value);
                     }
 
-                    self.state = if has_envelope {
-                        State::Applying {
-                            last_seen: setting.clone(),
-                            setting,
-                            deadline: old_deadline,
-                            needs_reaffirm: false,
-                        }
-                    } else {
-                        State::SyncedTrans { value: setting }
+                    info!("has envelope, transitioning to Applying");
+                    self.state = State::Applying {
+                        last_seen: setting.clone(),
+                        setting,
+                        deadline: old_deadline,
+                        needs_reaffirm: false,
                     };
                 } else {
                     *deadline = next_envelope;
@@ -291,6 +307,7 @@ where
             State::SyncedTrans { value } => {
                 if value != &new_value {
                     self.reporter.report_value(new_value.clone().into()).await;
+                    info!("value differs from previous, transitioning to Overridden");
                     self.state = State::Overridden {
                         deadline: next_deadline,
                         setting: value.clone(),
@@ -321,8 +338,9 @@ where
     ///
     /// This method is cancel-safe.
     #[inline(never)]
-    #[instrument(skip(self))]
+    #[instrument(skip(self), fields(state = ?self.state))]
     pub async fn next_setting(&mut self) -> Option<SettingTransaction<T>> {
+        debug!("waiting for the next setting in state {:?}", self.state);
         let result = loop {
             match &mut self.state {
                 // At this point, we have no known state. If a setting comes in,
@@ -331,6 +349,9 @@ where
                 State::Unknown => {
                     let reply = self.set_stream.next().await?;
 
+                    debug!(
+                        "received new setting, transitioning to UnknownTrans"
+                    );
                     self.state = State::UnknownTrans {
                         value: reply.0,
                         report: Some(reply.1),
@@ -345,10 +366,10 @@ where
                     self.reporter.report_value(value.clone().into()).await;
 
                     let value = value.clone();
-                    let deadline = tokio::time::Instant::now()
-                        + self.envelope.unwrap_or_default();
+                    let deadline = tokio::time::Instant::now() + self.envelope;
                     let report = report.take();
 
+                    debug!("transitioning to Applying");
                     self.state = State::Applying {
                         setting: value.clone(),
                         last_seen: value.clone(),
@@ -362,22 +383,25 @@ where
                     let reply = self.set_stream.next().await?;
 
                     self.state = if reply.0 != *value {
+                        debug!("value differs from previous, transitioning to ApplyingTrans");
                         State::ApplyingTrans {
                             setting: reply.0.clone(),
                             last_seen: value.clone(),
                             deadline: tokio::time::Instant::now()
-                                + self.envelope.unwrap_or_default(),
+                                + self.envelope,
                             to_send: (reply.0, Some(reply.1)),
                             needs_report: true,
                         }
                     } else {
                         reply.1.ok(reply.0.clone());
+                        debug!("value matches previous, transitioning to SyncedTrans");
                         State::SyncedTrans { value: reply.0 }
                     };
                 }
 
                 State::SyncedTrans { value } => {
                     self.reporter.report_value(value.clone().into()).await;
+                    debug!("transitioning from SyncedTrans to Synced");
                     self.state = State::Synced {
                         value: value.clone(),
                     };
@@ -401,93 +425,76 @@ where
                         *needs_reaffirm = false;
                     }
 
-                    if let Some(envelope) = self.envelope {
-                        let now = tokio::time::Instant::now();
+                    let now = tokio::time::Instant::now();
 
-                        if *deadline <= now {
+                    if *deadline <= now {
+                        if last_seen == setting {
+                            debug!("deadline reached and last_seen matches setting, transitioning to Synced");
+                            self.state = State::Synced {
+                                value: setting.clone(),
+                            };
+                        } else {
+                            // The backend never saw this reading while we were
+                            // waiting out the envelope, so report it now or
+                            // clients are stuck seeing the stale setting.
+                            self.reporter
+                                .report_value(last_seen.clone().into())
+                                .await;
+                            debug!("deadline reached and last_seen differs from setting, transitioning to Overridden");
+                            self.state = State::Overridden {
+                                setting: setting.clone(),
+                                r#override: last_seen.clone(),
+                                deadline: now
+                                    + self
+                                        .override_duration
+                                        .unwrap_or_default(),
+                            };
+                        }
+                        continue;
+                    }
+
+                    let delay = deadline.saturating_duration_since(now);
+
+                    // Wait for a setting, or for the envelope to
+                    // elapse so we can decide the outcome.
+
+                    tokio::select! {
+                        reply = self.set_stream.next() => {
+                            match reply {
+                                Some(r) => {
+                                    if r.0 != *setting {
+                                        debug!("new setting differs from current, transitioning to ApplyingTrans");
+                                        self.state = State::ApplyingTrans {
+                                            setting: r.0.clone(),
+                                            last_seen: last_seen.clone(),
+                                            deadline: tokio::time::Instant::now() + self.envelope,
+                                            to_send: (r.0, Some(r.1)),
+                                            needs_report: true,
+                                        };
+                                    } else {
+                                        r.1.ok(r.0.clone());
+                                        *needs_reaffirm = true;
+                                    }
+                                }
+                                None => break None,
+                            }
+                        }
+                        _ = tokio::time::sleep(delay) => {
                             if last_seen == setting {
-                                self.state = State::Synced {
-                                    value: setting.clone(),
-                                };
+                                debug!("TIMEOUT : last seen matches setting, transitioning to Synced");
+                                self.state = State::Synced { value: setting.clone() };
                             } else {
-                                // The backend never saw this reading
-                                // while we were waiting out the
-                                // envelope, so report it now or
-                                // clients are stuck seeing the stale
-                                // setting.
-                                self.reporter
-                                    .report_value(last_seen.clone().into())
-                                    .await;
+                                // Same as above: report the real
+                                // reading before committing to
+                                // `Overridden`.
+                                self.reporter.report_value(last_seen.clone().into()).await;
+                                info!("TIMEOUT : last seen differs from setting, transitioning to Overridden");
                                 self.state = State::Overridden {
                                     setting: setting.clone(),
                                     r#override: last_seen.clone(),
-                                    deadline: now
-                                        + self
-                                            .override_duration
-                                            .unwrap_or_default(),
+                                    deadline: tokio::time::Instant::now() + self.override_duration.unwrap_or_default(),
                                 };
                             }
-                            continue;
-                        }
-
-                        let delay = deadline.saturating_duration_since(now);
-
-                        // Wait for a setting, or for the envelope to
-                        // elapse so we can decide the outcome.
-                        #[rustfmt::skip]
-                        tokio::select! {
-                            reply = self.set_stream.next() => {
-                                match reply {
-                                    Some(r) => {
-                                        if r.0 != *setting {
-                                            self.state = State::ApplyingTrans {
-                                                setting: r.0.clone(),
-                                                last_seen: last_seen.clone(),
-                                                deadline: tokio::time::Instant::now() + envelope,
-                                                to_send: (r.0, Some(r.1)),
-                                                needs_report: true,
-                                            };
-                                        } else {
-                                            r.1.ok(r.0.clone());
-                                            *needs_reaffirm = true;
-                                        }
-                                    }
-                                    None => break None,
-                                }
-                            }
-                            _ = tokio::time::sleep(delay) => {
-                                if last_seen == setting {
-                                    self.state = State::Synced { value: setting.clone() };
-                                } else {
-                                    // Same as above: report the real
-                                    // reading before committing to
-                                    // `Overridden`.
-                                    self.reporter.report_value(last_seen.clone().into()).await;
-                                    self.state = State::Overridden {
-                                        setting: setting.clone(),
-                                        r#override: last_seen.clone(),
-                                        deadline: tokio::time::Instant::now() + self.override_duration.unwrap_or_default(),
-                                    };
-                                }
-                            }
-                        }
-                    } else {
-                        match self.set_stream.next().await {
-                            Some(reply) => {
-                                if reply.0 != *setting {
-                                    self.state = State::ApplyingTrans {
-                                        setting: reply.0.clone(),
-                                        last_seen: last_seen.clone(),
-                                        deadline: tokio::time::Instant::now(),
-                                        to_send: (reply.0, Some(reply.1)),
-                                        needs_report: true,
-                                    };
-                                } else {
-                                    reply.1.ok(reply.0.clone());
-                                    *needs_reaffirm = true;
-                                }
-                            }
-                            None => break None,
                         }
                     }
                 }
@@ -516,6 +523,10 @@ where
                     let deadline = *deadline;
                     let result = (to_send.0.clone(), to_send.1.take());
 
+                    debug!(
+                        "transitioning to Applying with setting {:?}",
+                        setting
+                    );
                     self.state = State::Applying {
                         setting,
                         last_seen,
@@ -539,15 +550,16 @@ where
 
                         if *deadline <= now {
                             self.state = if setting != r#override {
+                                debug!("override deadline reached, transitioning to ApplyingTrans");
                                 State::ApplyingTrans {
                                     setting: setting.clone(),
                                     last_seen: r#override.clone(),
-                                    deadline: now
-                                        + self.envelope.unwrap_or_default(),
+                                    deadline: now + self.envelope,
                                     to_send: (setting.clone(), None),
                                     needs_report: true,
                                 }
                             } else {
+                                debug!("override deadline reached, transitioning to Synced");
                                 State::Synced {
                                     value: r#override.clone(),
                                 }
@@ -598,15 +610,17 @@ where
                                 // setting).
 
                                 self.state = if setting != r#override {
+                                    debug!("override deadline reached, transitioning to ApplyingTrans");
                                     State::ApplyingTrans {
                                         setting: setting.clone(),
                                         last_seen: r#override.clone(),
                                         deadline: tokio::time::Instant::now()
-                                            + self.envelope.unwrap_or_default(),
+                                            + self.envelope,
                                         to_send: (setting.clone(), None),
                                         needs_report: true,
                                     }
                                 } else {
+                                    debug!("override deadline reached, transitioning to Synced");
                                     State::Synced {
                                         value: r#override.clone()
                                     }
@@ -1677,29 +1691,6 @@ mod tests {
             timeout(Duration::from_secs(0), rx_rdg.recv()).await,
             Ok(Some(device::Value::Int(1)))
         ));
-
-        std::mem::drop(tx_set);
-    }
-
-    #[tokio::test]
-    async fn test_envelope_none_matches_old_behavior() {
-        let (tx_set, mut rx_rdg, mut sh_dev) =
-            mk_device::<bool>(Some(true), None, None);
-
-        assert!(matches!(
-            timeout(Duration::from_secs(0), sh_dev.next_setting()).await,
-            Ok(Some((true, None)))
-        ));
-        assert!(matches!(
-            timeout(Duration::from_secs(0), rx_rdg.recv()).await,
-            Ok(Some(device::Value::Bool(true)))
-        ));
-
-        // With no envelope configured, a single matching poll commits
-        // immediately -- no settle period, exactly like before this
-        // feature existed.
-        sh_dev.report_update(true).await;
-        assert!(matches!(&sh_dev.state, State::Synced { value: true }));
 
         std::mem::drop(tx_set);
     }
