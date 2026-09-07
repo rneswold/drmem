@@ -184,8 +184,12 @@ impl<R: Reporter> HueDevice<R> for ColorBulbDevice<R> {
 
         let bridge = color::color_to_bridge(&val);
 
-        // Store the XY coordinates we're sending to the bridge
+        // Store the XY coordinates we're sending to the bridge, and the
+        // setting itself so `apply_update` knows which `ColorType`
+        // variant (`Rgba` or `Ccta`) to preserve when the bridge just
+        // echoes back the xy we sent.
         self.last_xy = Some(bridge.xy);
+        self.last_color = val;
 
         Some(payload::LightCommand {
             on: Some(payload::On { on: bridge.on }),

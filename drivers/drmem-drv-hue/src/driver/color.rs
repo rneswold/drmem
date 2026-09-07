@@ -80,20 +80,25 @@ pub fn color_to_bridge(color: &ColorType) -> BridgeState {
 
 /// Merges the (possibly partial) on/off, brightness, and XY state
 /// reported by the bridge into a new `ColorType`, using `prev` to fill
-/// in any component that wasn't reported. Since the bridge only ever
-/// echoes XY coordinates, the result is always a `ColorType::Rgba`.
+/// in any component that wasn't reported. The bridge only ever echoes
+/// XY coordinates, so a reported `xy` always yields a `ColorType::Rgba`.
+/// But when `xy` is `None` (the caller filters out echoes that just
+/// match what was last sent), `prev`'s representation -- `Rgba` or
+/// `Ccta` -- is preserved. This matters because a `Ccta` setting can
+/// never compare equal to the `Rgba` the bridge would otherwise force
+/// it into, which would make `OverridableDevice` treat every polled
+/// reading as a mismatch and re-send the setting forever.
 pub fn merge_bridge_update(
     prev: &ColorType,
     on: Option<bool>,
     brightness: Option<f32>,
     xy: Option<(f32, f32)>,
 ) -> ColorType {
-    let prev_rgba = match prev {
-        ColorType::Rgba { color } => *color,
-        ColorType::Ccta { .. } => LinSrgba::new(255, 255, 255, 255),
+    let prev_alpha = match prev {
+        ColorType::Rgba { color } => color.alpha,
+        ColorType::Ccta { a, .. } => *a,
     };
-    let rgb = xy.map_or(prev_rgba, |(x, y)| cie_xy_to_rgba(x, y));
-    let is_on = on.unwrap_or(prev_rgba.alpha > 0);
+    let is_on = on.unwrap_or(prev_alpha > 0);
 
     let alpha = if !is_on {
         0
@@ -103,11 +108,24 @@ pub fn merge_bridge_update(
         // Just turned on with no explicit brightness: default to 100%.
         255
     } else {
-        prev_rgba.alpha
+        prev_alpha
     };
 
-    ColorType::Rgba {
-        color: LinSrgba::new(rgb.red, rgb.green, rgb.blue, alpha),
+    match (xy, prev) {
+        (None, ColorType::Ccta { kelvin, .. }) => ColorType::Ccta {
+            kelvin: *kelvin,
+            a: alpha,
+        },
+        (None, ColorType::Rgba { color }) => ColorType::Rgba {
+            color: LinSrgba::new(color.red, color.green, color.blue, alpha),
+        },
+        (Some((x, y)), _) => {
+            let rgb = cie_xy_to_rgba(x, y);
+
+            ColorType::Rgba {
+                color: LinSrgba::new(rgb.red, rgb.green, rgb.blue, alpha),
+            }
+        }
     }
 }
 
